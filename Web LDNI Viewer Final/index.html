@@ -1,0 +1,212 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="./js/three.js"></script>
+    <script src="./js/TrackballControls.js"></script>
+    <script src="./js/OrbitControls.js"></script>
+    <script src="./js/BufferGeometryUtils.js"></script>
+    <script src="./js/STLExporter.js"></script>
+    <script src="./js/pako.min.js"></script>
+    <script src="./js/resolve.js"></script>
+
+    <style>
+        .btn {
+            position: fixed;
+            top: 5px;
+            left: 5px;
+            z-index: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="btn">
+        <p>
+            <label>LDNI File</label>
+            <input type="file" id="ldni">
+        </p>
+        <P>
+            <label>Vec4 File</label>
+            <input type="file" id="file">
+        </P>
+        <button onclick="resChange()">Toggle Pseudo Anti-Aliasing</button>
+        <p id= "status"></p>
+
+        <label>Upscaled Pixel Resolution, </P> (Higher reduces artifacts, default = 2.0):</label>
+        <input id = "pr" type="number" value="2.0" step="0.1" min="0" max="10" onchange="pixelRatioChange()">
+        </P>
+    </div>
+    
+
+</body>
+<script>
+    let scene, mesh, camera, controls, renderer, opt;
+
+    var upscaledPixelRatio = 2.0; // increase this number to reduce aliasing effects
+
+    function resChange() {
+
+        if (opt) {
+            document.getElementById("status").innerHTML = "Off";
+            opt = false;
+            renderer.setPixelRatio(0.8);
+        }
+        else {
+            document.getElementById("status").innerHTML = "On";
+            opt = true;
+            renderer.setPixelRatio(upscaledPixelRatio);
+        }
+    }
+
+    function pixelRatioChange() {
+        upscaledPixelRatio = document.getElementById("pr").value;
+        renderer.setPixelRatio(upscaledPixelRatio);
+        console.log(upscaledPixelRatio);
+    }
+
+    function initWebGL() {
+        let height = window.innerHeight; //窗口高度
+        let width = window.innerWidth; //窗口高度
+        scene = new THREE.Scene();
+        let dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        
+        dirLight.position.set(- 1, 1.75, 1);
+
+        let dirLight1 = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight1.position.set(1, -1.75, -1);
+
+       
+        scene.add(dirLight);
+        scene.add(dirLight1);
+
+        const helper = new THREE.AxesHelper();
+        scene.add(helper);
+        var zNear = 10;
+        var zFar = 10000;
+        camera = new THREE.PerspectiveCamera(45, width / height, zNear, zFar);
+        camera.position.set(1000, -800, 800); //设置相机位置
+        camera.up = new THREE.Vector3(0, 0, 1);
+        renderer = new THREE.WebGLRenderer({antialias : false, stencil: false, powerPreference: "low-power"});
+        renderer.setSize(width, height);//设置渲染区域尺寸
+        renderer.setClearColor(0xffffff, 1); //设置背景颜色
+        document.body.appendChild(renderer.domElement); //body元素中插入canvas对象
+
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.addEventListener('change', render);
+        controls.enableKeys = true;
+        render();
+
+     
+    }
+    function render() {
+            renderer.render(scene, camera);
+    }
+
+    function loadVec4(blob) {
+        const foader = new FileReader();
+
+        THREE.Cache.enabled = true;
+        let columns;
+        if (blob instanceof Blob) {
+
+            foader.readAsText(blob);
+            foader.onload = function (e) {
+
+                getModel(e.target.result);
+
+            }
+        } else {
+            getModel(blob);
+        }
+
+
+    }
+    function getModel(data) {
+        if (mesh) {
+            scene.remove(mesh);
+            mesh.geometry.dispose();
+            mesh.material.dispose();
+            mesh = null;
+        }
+        const points = data.split('\n').map(item => item.split(' ').map(n => Number(n)).filter(n => !isNaN(n)));
+        const result = []
+        points.pop();
+        points.shift();
+
+        const matrixs = [];
+        
+        const geometry = new THREE.BoxBufferGeometry(1, 1, 1);
+    
+ 
+
+    
+        let material = new THREE.MeshLambertMaterial({ color: 'white' }); 
+        //material.wireframe = true; 
+        mesh = new THREE.InstancedMesh(geometry, material, points.length);
+
+        for (let i = 0; i < points.length; i++) {
+            if (points[i][3] != 0) { // fixes black tile problem
+            mesh.setMatrixAt(i, points[i]);
+            }
+        }
+  
+        // scene.scale.set(0.1, 0.1, 0.1); // scale down to improve precision
+        scene.add(mesh);
+        render();
+
+        function saveModel(mesh) {
+            let _link = document.createElement('a');
+            _link.style.display = 'none';
+            document.body.appendChild(_link);
+            const save = (blob, filename) => {
+
+                _link.href = URL.createObjectURL(blob);
+                _link.download = filename;
+                _link.click();
+
+            }
+
+            const saveArrayBuffer = (buffer, filename) => {
+
+                save(new Blob([buffer], { type: 'application/octet-stream' }), filename);
+
+            }
+
+            const exporter = new THREE.STLExporter();
+            const result = exporter.parse(mesh, { binary: true });
+
+            saveArrayBuffer(result, 'model.stl');
+        }
+    }
+    initWebGL();
+    render();
+    document.getElementById('file').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) {
+            return;
+        }
+        loadVec4(file);
+        e.target.value = null;
+       
+
+    })
+    document.getElementById('ldni').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) {
+            return;
+        }
+        resolveLdni(file).then(data => {
+
+            loadVec4(data);
+            e.target.value = null;
+        });
+        
+    })
+</script>
+
+</html>
